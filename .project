@@ -57,6 +57,11 @@
 			<location>/Users/robertdekok/Library/Mobile Documents/com~apple~CloudDocs/ARDUINO/libraries/DHT-sensor-library-master</location>
 		</link>
 		<link>
+			<name>libraries/EEPROM</name>
+			<type>2</type>
+			<locationURI>ECLIPSE_HOME/arduinoPlugin/packages/arduino/hardware/avr/1.6.20/libraries/EEPROM</locationURI>
+		</link>
+		<link>
 			<name>libraries/Grove_Barometer_Sensor-master</name>
 			<type>2</type>
 			<location>/Users/robertdekok/Library/Mobile Documents/com~apple~CloudDocs/ARDUINO/libraries/Grove_Barometer_Sensor-master</location>

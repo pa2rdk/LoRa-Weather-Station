@@ -9,11 +9,13 @@
 #include "LowPower.h"
 #include "BMP085.h"
 #include <Wire.h>
+#include <EEPROM.h>
 
 //Constants
 
 #define DHTPIN 10     // what pin we're connected to
 #define DHTTYPE DHT11   // DHT 22  (AM2302)
+#define offsetEEPROM 0x0    //offset config
 DHT dht(DHTPIN, DHTTYPE); //// Initialize DHT sensor for normal 16mhz Arduino
 BMP085 myBarometer;
 
@@ -27,7 +29,7 @@ bool joined = false;
 #define powerPin	12
 #define VBATPIN A9
 const int wakeUpPin = 1;
-const int maxLoop = 75;
+const int maxLoop = 4;
 
 bool txComplete=false;
 bool moveDetected = false;
@@ -63,6 +65,29 @@ bool fix=1;
 
 static osjob_t sendjob;
 static osjob_t initjob;
+
+char receivedString[28];
+char chkGS[3] = "GS";
+
+struct StoreStruct {
+	byte chkDigit;
+	byte aprsChannel;
+	byte rxChannel;
+	byte txChannel;
+	byte rxTone;
+	byte txTone;
+	char dest[8];
+};
+
+StoreStruct storage = {
+		"#",
+		64,
+		140,
+		92,
+		8,
+		8,
+		"APZRAZ"
+};
 
 // Pin mapping is hardware specific.
 // Pin mapping
@@ -182,6 +207,16 @@ static void initfunc (osjob_t* j) {
 	// init done - onEvent() callback will be invoked...
 }
 
+void forceTxSingleChannelDr(int channel) {
+	for(int i=0; i<9; i++) { // For EU; for US use i<71
+		if(i != channel) {
+			LMIC_disableChannel(i);
+		}
+	}
+	// Set data rate (SF) and transmit power for uplink
+	LMIC_setDrTxpow(DR_SF9, 14);
+}
+
 void setup()
 {
 	// Disable GPS power
@@ -193,6 +228,27 @@ void setup()
 	delay(5000);
 	Serial.begin(115200);
 	Serial.println(F("Starting"));
+
+	if (EEPROM.read(offsetEEPROM) != storage.chkDigit){
+		//if (EEPROM.read(offsetEEPROM) != storage.chkDigit){
+		Serial.println(F("Writing defaults"));
+		saveConfig();
+	}
+
+	loadConfig();
+	printConfig();
+
+	Serial.println(F("Type GS to enter setup:"));
+	delay(5000);
+
+	//if (Serial.available()>0) {
+	//	Serial.println(F("Check for setup"));
+		if (Serial.find(chkGS)) {
+			Serial.println(F("Setup entered..."));
+			setSettings(1);
+			delay(2000);
+		}
+	//}
 
 	delay(2000);
 
@@ -223,6 +279,7 @@ void setup()
 
 	// Set data rate and transmit power for uplink (note: txpow seems to be ignored by the library)
 	LMIC_setDrTxpow(DR_SF9,14);
+	//forceTxSingleChannelDr(1);
 
 	digitalWrite(sendPin, LOW);
 	digitalWrite(powerPin, LOW);
@@ -243,7 +300,7 @@ void loop()
 	digitalWrite(LedPin, LOW);
 
 	moveDetected = false;
-	attachInterrupt(3, wakeUp, HIGH);
+	//attachInterrupt(3, wakeUp, HIGH);
 	for(int x=0;x<maxLoop;x++){
 		digitalWrite(LedPin, LOW);
 		LowPower.powerDown(SLEEP_8S, ADC_OFF, BOD_OFF);
@@ -253,10 +310,182 @@ void loop()
 		if (moveDetected==true) x = maxLoop;
 	}
 	//LowPower.powerDown(SLEEP_FOREVER, ADC_OFF, BOD_OFF);
-	detachInterrupt(3);
+	//detachInterrupt(3);
 	digitalWrite(powerPin, HIGH);
 	digitalWrite(LedPin, HIGH);
 	delay(5000);
+}
+
+void saveConfig() {
+	for (unsigned int t = 0; t < sizeof(storage); t++)
+		EEPROM.write(offsetEEPROM + t, *((char*)&storage + t));
+}
+
+void loadConfig() {
+	if (EEPROM.read(offsetEEPROM + 0) == storage.chkDigit)
+		for (unsigned int t = 0; t < sizeof(storage); t++)
+			*((char*)&storage + t) = EEPROM.read(offsetEEPROM + t);
+}
+
+void printConfig() {
+	if (EEPROM.read(offsetEEPROM + 0) == storage.chkDigit)
+		for (unsigned int t = 0; t < sizeof(storage); t++)
+			Serial.write(EEPROM.read(offsetEEPROM + t));
+	Serial.println();
+	setSettings(0);
+}
+
+void setSettings(bool doSet) {
+	int i = 0;
+	byte b;
+	receivedString[0] = 'X';
+
+	Serial.print(F("APRS Channel ("));
+	Serial.print(storage.aprsChannel);
+	Serial.print(F("):"));
+	if (doSet == 1) {
+		i = getNumericValue();
+		if (receivedString[0] != 0) storage.aprsChannel = i;
+	}
+	Serial.println();
+
+	Serial.print(F("RX Channel ("));
+	Serial.print(storage.rxChannel);
+	Serial.print(F("):"));
+	if (doSet == 1) {
+		i = getNumericValue();
+		if (receivedString[0] != 0) storage.rxChannel = i;
+	}
+	Serial.println();
+
+	Serial.print(F("TX Channel ("));
+	Serial.print(storage.txChannel);
+	Serial.print(F("):"));
+	if (doSet == 1) {
+		i = getNumericValue();
+		if (receivedString[0] != 0) storage.txChannel = i;
+	}
+	Serial.println();
+
+	Serial.print(F("RX Tone ("));
+	Serial.print(storage.rxTone);
+	Serial.print(F("):"));
+	if (doSet == 1) {
+		i = getNumericValue();
+		if (receivedString[0] != 0) storage.rxTone = i;
+	}
+	Serial.println();
+
+	Serial.print(F("TX Tone ("));
+	Serial.print(storage.txTone);
+	Serial.print(F("):"));
+	if (doSet == 1) {
+		i = getNumericValue();
+		if (receivedString[0] != 0) storage.txTone = i;
+	}
+	Serial.println();
+
+	Serial.print(F("Dest. ("));
+	Serial.print(storage.dest);
+	Serial.print(F("):"));
+	if (doSet == 1) {
+		getStringValue(7,true);
+		if (receivedString[0] != 0) {
+			storage.dest[0] = 0;
+			strcat(storage.dest, receivedString);
+		}
+	}
+	Serial.println();
+
+	if (doSet == 1) {
+		saveConfig();
+		loadConfig();
+	}
+}
+
+void getStringValue(int length, bool fixedLen) {
+	serialFlush();
+	receivedString[0] = 0;
+	int i = 0;
+	while (receivedString[i] != 13 && i < length) {
+		if (Serial.available() > 0) {
+			receivedString[i] = Serial.read();
+			if (receivedString[i] == 13 || receivedString[i] == 10) {
+				i--;
+			}
+			else {
+				Serial.write(receivedString[i]);
+			}
+			i++;
+		}
+	}
+	if (fixedLen==true && i>0 ){
+		while (i<length-1){
+			receivedString[i]=' ';
+			i++;
+		}
+	}
+	receivedString[i] = 0;
+	serialFlush();
+}
+
+byte getCharValue() {
+	serialFlush();
+	receivedString[0] = 0;
+	int i = 0;
+	while (receivedString[i] != 13 && i < 2) {
+		if (Serial.available() > 0) {
+			receivedString[i] = Serial.read();
+			if (receivedString[i] == 13 || receivedString[i] == 10) {
+				i--;
+			}
+			else {
+				Serial.write(receivedString[i]);
+			}
+			i++;
+		}
+	}
+	receivedString[i] = 0;
+	serialFlush();
+	return receivedString[i - 1];
+}
+
+byte getNumericValue() {
+	serialFlush();
+	byte myByte = 0;
+	byte inChar = 0;
+	bool isNegative = false;
+	receivedString[0] = 0;
+
+	int i = 0;
+	while (inChar != 13) {
+		if (Serial.available() > 0) {
+			inChar = Serial.read();
+			if (inChar > 47 && inChar < 58) {
+				receivedString[i] = inChar;
+				i++;
+				Serial.write(inChar);
+				myByte = (myByte * 10) + (inChar - 48);
+			}
+			if (inChar == 45) {
+				Serial.write(inChar);
+				isNegative = true;
+			}
+		}
+	}
+	receivedString[i] = 0;
+	if (isNegative == true) myByte = myByte * -1;
+	serialFlush();
+	return myByte;
+}
+
+void serialFlush() {
+	for (int i = 0; i < 10; i++)
+	{
+		while (Serial.available() > 0) {
+			Serial.read();
+		}
+	}
 }
 
 
